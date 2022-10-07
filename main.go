@@ -10,15 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/gorilla/mux"
 )
 
 func someTempFunc(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Main page")
-}
-
-func saveUrl(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Saving url")
+	fmt.Fprint(w, "Hello! This is Main page.")
 }
 
 func getShortUrl(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +26,7 @@ func getShortUrl(w http.ResponseWriter, r *http.Request) {
 func addUrl(w http.ResponseWriter, r *http.Request) {
 	newUrl := mux.Vars(r)
 	temp := fmt.Sprint(newUrl["url"])
+	Database.AddUrl(temp, MakeShortUrl(temp))
 	fmt.Println(temp, MakeShortUrl(temp))
 }
 
@@ -40,6 +39,10 @@ func MakeShortUrl(url string) string {
 
 func main() {
 	router := mux.NewRouter()
+
+	path := "./sqlite-database.db"
+	db := sqlite{Path: path}
+	db.Init()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop,
@@ -56,14 +59,9 @@ func main() {
 
 	defer server.Close()
 
-	http.Handle("/", router)
 	router.HandleFunc("/", someTempFunc)
-	router.HandleFunc("/save", saveUrl)
 	router.HandleFunc("/geturl", getShortUrl)
 	router.HandleFunc("/add/{url}", addUrl)
-
-	// fmt.Println("Server starting on port: 8080")
-	// http.ListenAndServe(":8080", nil)
 
 	go func() {
 		fmt.Println("Server starting on port: 8080")
@@ -72,8 +70,17 @@ func main() {
 		}
 	}()
 
+	// log.Println("Creating sqlite-database.db...")
+	// file, err := os.Create("sqlite-database.db") // Create SQLite file
+	// if err != nil {
+	// 	log.Fatal(err.Error())
+	// }
+	// file.Close()
+	// log.Println("sqlite-database.db created")
+
+	// sqliteDatabase, _ := sql.Open("sqlite3", "./sqlite-database.db") // Open the created SQLite File
+	// defer sqliteDatabase.Close()                                     // Defer Closing the database
+
 	<-stop
-
 	fmt.Println(" Server was stoped")
-
 }
