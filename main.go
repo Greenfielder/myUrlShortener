@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/gorilla/mux"
@@ -22,28 +23,15 @@ type urlline struct {
 	shorturl string
 }
 
-func MakeShortUrl(url string) string {
-	tempUrl := md5.Sum([]byte(url))
-	hashUrl := hex.EncodeToString(tempUrl[:])
-	shortHashUrl := hashUrl[:len(hashUrl)-25]
-	return shortHashUrl
-}
+var tpl = template.Must(template.ParseFiles("index.html"))
+var tpl2 = template.Must(template.ParseFiles("done.html"))
+var Done string
+var HostName string = "http://localhost:8080/"
 
 func main() {
+	initDb()
+
 	router := mux.NewRouter()
-
-	// db, err := sql.Open("sqlite3", "urldata.db")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer db.Close()
-
-	// temp := "mail.ru"
-	// sqlInit := `create table if not exists urlslist (id integer not null primary key, url text, shorturl text);`
-	// _, err = db.Exec(sqlInit)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop,
@@ -60,11 +48,12 @@ func main() {
 
 	defer server.Close()
 
-	router.HandleFunc("/", someTempFunc)
+	fs := http.StripPrefix("/assets/", http.FileServer(http.Dir("./assets/")))
+	router.PathPrefix("/assets/").Handler(fs)
+	router.HandleFunc("/", mainPage)
 	router.HandleFunc("/geturl", getAll)
-	router.HandleFunc("/add/{url}", addUrl)
-	router.HandleFunc("/get/{url}", getUrl)
-	router.HandleFunc("/{url}", getShortUrl)
+	router.HandleFunc("/add", addUrl)
+	router.HandleFunc("/{url}", shortUrtToOrig)
 
 	go func() {
 		fmt.Println("Server starting on port: 8080")
@@ -77,24 +66,93 @@ func main() {
 	fmt.Println(" Server was stoped")
 }
 
-func someTempFunc(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Hello! This is Main page.")
-	ip := strings.Split(r.RemoteAddr, " :")
-	xtype := fmt.Sprintf("%T", ip)
-	fmt.Println(xtype)
+// func MakeShortUrl convert url to hash
+func MakeShortUrl(url string) string {
+	tempUrl := md5.Sum([]byte(url))
+	hashUrl := hex.EncodeToString(tempUrl[:])
+	shortHashUrl := hashUrl[:len(hashUrl)-25]
+	return shortHashUrl
 }
 
-//func getAll returns all urls
-func getAll(w http.ResponseWriter, r *http.Request) {
+// func initDb is initialize database
+func initDb() {
 	db, err := sql.Open("sqlite3", "urldata.db")
 	if err != nil {
 		panic(err)
 	}
 	defer db.Close()
 
+	sqlInit := `create table if not exists urlslist (id integer not null primary key, url text, shorturl text);`
+	_, err = db.Exec(sqlInit)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func mainPage(w http.ResponseWriter, r *http.Request) {
+	tpl.Execute(w, nil)
+}
+
+// func addUrl, add url to database and return his short variant
+func addUrl(w http.ResponseWriter, r *http.Request) {
+	u, err := url.Parse(r.URL.String())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal server error"))
+		return
+	}
+
+	params := u.Query()
+	searchKey := params.Get("q")
+	Done = HostName + MakeShortUrl(searchKey)
+	fmt.Sprintln(searchKey, Done)
+
+	db, err := sql.Open("sqlite3", "urldata.db")
+	if err != nil {
+		log.Println(err)
+	}
+	defer db.Close()
+
+	result, err := db.Exec("insert into urlslist (url, shorturl) values ($1, $2)", searchKey, MakeShortUrl(searchKey))
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Println(result)
+
+	tpl2.ExecuteTemplate(w, "done.html", struct{ Test string }{Test: Done})
+}
+
+// func getShortUrl get shorl url, like: http://localhost:8080/b10e94d And redirect to https://mail.ru
+func shortUrtToOrig(w http.ResponseWriter, r *http.Request) {
+	newUrl := mux.Vars(r)
+	adress := fmt.Sprint(newUrl["url"])
+
+	db, err := sql.Open("sqlite3", "urldata.db")
+	if err != nil {
+		log.Println(err)
+	}
+	defer db.Close()
+
+	row := db.QueryRow("select * from urlslist where shorturl = $1", adress)
+	uls := urlline{}
+	err = row.Scan(&uls.id, &uls.url, &uls.shorturl)
+	if err != nil {
+		log.Println(err)
+	}
+	http.Redirect(w, r, uls.url, http.StatusSeeOther)
+}
+
+//func getAll returns all urls
+func getAll(w http.ResponseWriter, r *http.Request) {
+	db, err := sql.Open("sqlite3", "urldata.db")
+	if err != nil {
+		log.Println(err)
+	}
+	defer db.Close()
+
 	rows, err := db.Query("select * from urlslist")
 	if err != nil {
-		panic(err)
+		log.Println(err)
 	}
 	defer rows.Close()
 
@@ -104,7 +162,7 @@ func getAll(w http.ResponseWriter, r *http.Request) {
 		ul := urlline{}
 		err := rows.Scan(&ul.id, &ul.url, &ul.shorturl)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			continue
 		}
 		uls = append(uls, ul)
@@ -113,69 +171,4 @@ func getAll(w http.ResponseWriter, r *http.Request) {
 	for _, ul := range uls {
 		fmt.Println(ul.id, ul.url, ul.shorturl)
 	}
-
-}
-
-// func addUrl Add url, like: http://localhost:8080/add/mail.ru
-func addUrl(w http.ResponseWriter, r *http.Request) {
-	newUrl := mux.Vars(r)
-	temp := fmt.Sprint(newUrl["url"])
-	fmt.Println(temp, MakeShortUrl(temp))
-
-	db, err := sql.Open("sqlite3", "urldata.db")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	result, err := db.Exec("insert into urlslist (url, shorturl) values ($1, $2)", temp, MakeShortUrl(temp))
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(result)
-}
-
-// func getUrl get url, like: http://localhost:8080/get/mail.ru
-func getUrl(w http.ResponseWriter, r *http.Request) {
-	newUrl := mux.Vars(r)
-	temp := fmt.Sprint(newUrl["url"])
-	fmt.Println(temp, MakeShortUrl(temp))
-
-	db, err := sql.Open("sqlite3", "urldata.db")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	row := db.QueryRow("select * from urlslist where url = $1", temp)
-	uls := urlline{}
-	err = row.Scan(&uls.id, &uls.url, &uls.shorturl)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(uls.shorturl)
-}
-
-// func getShortUrl get shorl url, like: http://localhost:8080/b10e94d And redirect to https://mail.ru
-func getShortUrl(w http.ResponseWriter, r *http.Request) {
-	newUrl := mux.Vars(r)
-	temp := fmt.Sprint(newUrl["url"])
-	fmt.Println(temp)
-
-	db, err := sql.Open("sqlite3", "urldata.db")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	row := db.QueryRow("select * from urlslist where shorturl = $1", temp)
-	uls := urlline{}
-	err = row.Scan(&uls.id, &uls.url, &uls.shorturl)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(uls.url)
-	final := "https://" + uls.url
-	http.Redirect(w, r, final, http.StatusSeeOther)
 }

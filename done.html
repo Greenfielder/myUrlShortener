@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>My Url Shortener</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+<main>
+    <header>
+      <a class="logo" href="/">HOME</a>
+    </header>
+
+    <div class="container">
+      <h2 id="doneurl">Done Short URL</h2>
+      
+      <form action="/search" method="GET">
+        
+        <div class="group">      
+          <input type="text" required name="q" value="{{ .Test }}" id="myInput">
+          <span class="highlight"></span>
+          <span class="bar"></span>
+          <button form="data" class="custom-btn btn-5" onclick="myFunction()">Скопировать</button>
+        </div>
+        
+      </form>
+          
+      <!-- <p class="footer">
+        Savenko Dmitry Pet Project
+      </p> -->
+      
+    </div>
+
+    <script>
+        function myFunction() {
+    var copyText = document.getElementById("myInput");
+    copyText.select();
+    document.execCommand("copy");
+    document.getElementById("doneurl").style.color = 'green';
+}
+    </script>
+
+  </main>
+  </body>
+</html>
